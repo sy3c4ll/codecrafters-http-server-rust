@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HttpMethod {
@@ -14,26 +15,6 @@ pub enum HttpMethod {
 }
 
 impl HttpMethod {
-    pub const fn from_bytes(name: &[u8]) -> Option<Self> {
-        match name {
-            b"GET" => Some(HttpMethod::Get),
-            b"HEAD" => Some(HttpMethod::Head),
-            b"POST" => Some(HttpMethod::Post),
-            b"PUT" => Some(HttpMethod::Put),
-            b"DELETE" => Some(HttpMethod::Delete),
-            b"CONNECT" => Some(HttpMethod::Connect),
-            b"OPTIONS" => Some(HttpMethod::Options),
-            b"TRACE" => Some(HttpMethod::Trace),
-            b"PATCH" => Some(HttpMethod::Patch),
-            _ => None,
-        }
-    }
-    pub const fn from_str(name: &str) -> Option<Self> {
-        Self::from_bytes(name.as_bytes())
-    }
-    pub const fn as_bytes(&self) -> &'static [u8] {
-        self.as_str().as_bytes()
-    }
     pub const fn as_str(&self) -> &'static str {
         match self {
             HttpMethod::Get => "GET",
@@ -52,5 +33,24 @@ impl HttpMethod {
 impl Display for HttpMethod {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for HttpMethod {
+    type Err = ();
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "GET" => Ok(HttpMethod::Get),
+            "HEAD" => Ok(HttpMethod::Head),
+            "POST" => Ok(HttpMethod::Post),
+            "PUT" => Ok(HttpMethod::Put),
+            "DELETE" => Ok(HttpMethod::Delete),
+            "CONNECT" => Ok(HttpMethod::Connect),
+            "OPTIONS" => Ok(HttpMethod::Options),
+            "TRACE" => Ok(HttpMethod::Trace),
+            "PATCH" => Ok(HttpMethod::Patch),
+            _ => Err(()),
+        }
     }
 }

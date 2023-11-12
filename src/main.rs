@@ -25,12 +25,12 @@ fn main() -> io::Result<()> {
                         eprintln!("[+] transaction complete with status {status}");
                     }
                     Err(e) => {
-                        eprintln!("[!] error while responding: {}", e);
+                        eprintln!("[!] error while responding: {e}");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[!] error while connecting: {}", e);
+                eprintln!("[!] error while connecting: {e}");
             }
         }
     }
@@ -44,8 +44,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<HttpStatus> {
 
     let request = parse_request(&buf[..len]);
     let response = match request {
-        Ok(request) => request_response(&request),
-        Err(_) => bad_request_response(),
+        Some(request) => request_response(&request),
+        None => bad_request_response(),
     };
     let buf = compose_response(&response);
 
@@ -53,29 +53,23 @@ fn handle_client(mut stream: TcpStream) -> io::Result<HttpStatus> {
     Ok(response.status)
 }
 
-fn parse_request(buf: &[u8]) -> io::Result<HttpRequest> {
+fn parse_request(buf: &[u8]) -> Option<HttpRequest> {
     let mut lines = buf
         .split(|c| *c == b'\n')
         .map(|s| s.strip_suffix(b"\r").unwrap_or(s))
         .skip_while(|s| s.is_empty());
-    let Some(start) = lines.next() else {
-        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
-    };
+    let start = lines.next()?;
 
-    let Ok(start) = std::str::from_utf8(start) else {
-        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData))
-    };
+    let start = std::str::from_utf8(start).ok()?;
     let mut start = start
         .split_whitespace()
         .filter(|s| !s.is_empty());
     let (Some(method), Some(path), Some(version), None) =
         (start.next(), start.next(), start.next(), start.next()) else {
-        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
+        return None;
     };
-    let (Some(method), path, Some(version)) =
-        (HttpMethod::from_str(method), PathBuf::from(path), HttpVersion::from_str(version)) else {
-        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
-    };
+    let (method, path, version) =
+        (str::parse(method).ok()?, PathBuf::from(path), str::parse(version).ok()?);
 
     let pairs = lines
         .by_ref()
@@ -85,9 +79,7 @@ fn parse_request(buf: &[u8]) -> io::Result<HttpRequest> {
                 .map_or(None, |s| s.split_once(':') )
                 .map(|(k, v)| (k.to_lowercase(), v.trim().to_owned()))
         );
-    let Some(headers) = pairs.collect::<Option<HashMap<_, _>>>() else {
-        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
-    };
+    let headers = pairs.collect::<Option<HashMap<_, _>>>()?;
     
     let body = lines
         .by_ref()
@@ -96,11 +88,29 @@ fn parse_request(buf: &[u8]) -> io::Result<HttpRequest> {
         .collect::<Vec<&[u8]>>()
         .join::<&[u8]>(b"\r\n");
 
-    Ok(HttpRequest { method, path, version, headers, body })
+    Some(HttpRequest { method, path, version, headers, body })
 }
 
 fn request_response(request: &HttpRequest) -> HttpResponse {
-    if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
+    if request.path == Path::new("/user-agent") {
+        match request.headers.get(&"User-Agent".to_lowercase()) {
+            Some(data) => HttpResponse {
+                version: request.version,
+                status: HttpStatus::OK,
+                headers: HashMap::from([
+                    ("Content-Type".to_string(), "text/plain".to_string()),
+                    ("Content-Length".to_string(), data.as_bytes().len().to_string()),
+                ]),
+                body: data.as_bytes().to_vec(),
+            },
+            None => HttpResponse {
+                version: request.version,
+                status: HttpStatus::NOT_FOUND,
+                headers: HashMap::new(),
+                body: Vec::new(),
+            },
+        }
+    } else if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
         HttpResponse {
             version: request.version,
             status: HttpStatus::OK,
