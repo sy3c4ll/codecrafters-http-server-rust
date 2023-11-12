@@ -20,14 +20,14 @@ fn main() -> io::Result<()> {
         match stream {
             Ok(stream) => {
                 eprintln!("[+] accepted new connection");
-                match handle_client(stream) {
+                std::thread::spawn(|| match handle_client(stream) {
                     Ok(status) => {
                         eprintln!("[+] transaction complete with status {status}");
                     }
                     Err(e) => {
                         eprintln!("[!] error while responding: {e}");
                     }
-                }
+                });
             }
             Err(e) => {
                 eprintln!("[!] error while connecting: {e}");
