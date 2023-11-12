@@ -2,23 +2,14 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HttpStatus {
-    code: u16,
-    message: &'static str,
+    pub code: u16,
+    pub message: &'static str,
 }
 
 impl HttpStatus {
     pub const OK: Self = Self { code: 200, message: "OK" };
+    pub const BAD_REQUEST: Self = Self { code: 400, message: "Bad Request" };
     pub const NOT_FOUND: Self = Self { code: 404, message: "Not Found" };
-
-    pub const fn from_status_code(code: u16) -> Option<Self> {
-        match code {
-            200 => Some(Self::OK),
-            404 => Some(Self::NOT_FOUND),
-            _ => None,
-        }
-    }
-    pub const fn code(&self) -> u16 { self.code }
-    pub const fn message(&self) -> &'static str { self.message }
 }
 
 impl Display for HttpStatus {

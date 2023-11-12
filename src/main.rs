@@ -6,10 +6,8 @@ use http_request::{HttpRequest, http_method::HttpMethod};
 use http_response::{HttpResponse, http_status::HttpStatus};
 use http_version::HttpVersion;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 fn main() -> io::Result<()> {
@@ -23,8 +21,8 @@ fn main() -> io::Result<()> {
             Ok(stream) => {
                 eprintln!("[+] accepted new connection");
                 match handle_client(stream) {
-                    Ok(()) => {
-                        eprintln!("[+] transaction complete");
+                    Ok(status) => {
+                        eprintln!("[+] transaction complete with status {status}");
                     }
                     Err(e) => {
                         eprintln!("[!] error while responding: {}", e);
@@ -40,73 +38,114 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn handle_client(mut stream: TcpStream) -> io::Result<()> {
+fn handle_client(mut stream: TcpStream) -> io::Result<HttpStatus> {
     let mut buf = [0u8; 0x1000];
     let len = stream.read(&mut buf)?;
 
     let request = parse_request(&buf[..len]);
     let response = match request {
-        Ok(ref request) => request_response(&request),
-        Err(_) => HttpResponse { version: HttpVersion::Http1_1, status: HttpStatus::NOT_FOUND },
+        Ok(request) => request_response(&request),
+        Err(_) => bad_request_response(),
     };
     let buf = compose_response(&response);
 
     stream.write_all(&buf[..])?;
-    request.map(|_| ())
+    Ok(response.status)
 }
 
 fn parse_request(buf: &[u8]) -> io::Result<HttpRequest> {
     let mut lines = buf
         .split(|c| *c == b'\n')
         .map(|s| s.strip_suffix(b"\r").unwrap_or(s))
-        .filter(|s| !s.is_empty());
+        .skip_while(|s| s.is_empty());
     let Some(start) = lines.next() else {
         return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
     };
 
-    let mut start = start.
-        split(|c| c.is_ascii_whitespace()).
-        filter(|s| !s.is_empty());
+    let Ok(start) = std::str::from_utf8(start) else {
+        return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData))
+    };
+    let mut start = start
+        .split_whitespace()
+        .filter(|s| !s.is_empty());
     let (Some(method), Some(path), Some(version), None) =
         (start.next(), start.next(), start.next(), start.next()) else {
         return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
     };
     let (Some(method), path, Some(version)) =
-        (HttpMethod::from_bytes(method), PathBuf::from(OsStr::from_bytes(path)), HttpVersion::from_bytes(version)) else {
+        (HttpMethod::from_str(method), PathBuf::from(path), HttpVersion::from_str(version)) else {
         return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
     };
 
-    let pairs = lines.map(|line| {
-        let sep = line.iter().take_while(|c| **c != b':').count();
-        if sep < line.len() {
-            Some((line[..sep].to_ascii_lowercase(), trim_ascii(&line[sep + 1..]).to_owned()))
-        } else {
-            None
-        }
-    });
+    let pairs = lines
+        .by_ref()
+        .take_while(|s| !s.is_empty())
+        .map(|line|
+            std::str::from_utf8(line)
+                .map_or(None, |s| s.split_once(':') )
+                .map(|(k, v)| (k.to_lowercase(), v.trim().to_owned()))
+        );
     let Some(headers) = pairs.collect::<Option<HashMap<_, _>>>() else {
         return io::Result::Err(io::Error::from(io::ErrorKind::InvalidData));
     };
+    
+    let body = lines
+        .by_ref()
+        .skip(1)
+        .take_while(|s| !s.is_empty())
+        .collect::<Vec<&[u8]>>()
+        .join::<&[u8]>(b"\r\n");
 
-    Ok(HttpRequest { method, path, version, headers })
+    Ok(HttpRequest { method, path, version, headers, body })
 }
 
 fn request_response(request: &HttpRequest) -> HttpResponse {
-    let version = request.version;
-    let status = match request.path == Path::new("/") {
-        true => HttpStatus::OK,
-        false => HttpStatus::NOT_FOUND,
-    };
+    if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
+        HttpResponse {
+            version: request.version,
+            status: HttpStatus::OK,
+            headers: HashMap::from([
+                ("Content-Type".to_string(), "text/plain".to_string()),
+                ("Content-Length".to_string(), data.as_bytes().len().to_string()),
+            ]),
+            body: data.as_bytes().to_vec(),
+        }
+    } else if request.path == Path::new("/") {
+        HttpResponse {
+            version: request.version,
+            status: HttpStatus::OK,
+            headers: HashMap::new(),
+            body: Vec::new(),
+        }
+    } else {
+        HttpResponse {
+            version: request.version,
+            status: HttpStatus::NOT_FOUND,
+            headers: HashMap::new(),
+            body: Vec::new(),
+        }
+    }
+}
 
-    HttpResponse { version, status }
+fn bad_request_response() -> HttpResponse {
+    HttpResponse {
+        version: HttpVersion::Http1_1,
+        status: HttpStatus::BAD_REQUEST,
+        headers: HashMap::new(),
+        body: Vec::new(),
+    }
 }
 
 fn compose_response(response: &HttpResponse) -> Vec<u8> {
-    format!("{} {}\r\n\r\n", response.version, response.status).into_bytes()
-}
+    let header = (response.headers.iter().fold(
+        format!("{} {}\r\n", response.version, response.status), 
+        |acc, (key, value)| acc + format!("{}: {}\r\n", key, value).as_str()
+    ) + "\r\n").into_bytes();
+    let body = if response.body.is_empty() {
+        Vec::new()
+    } else {
+        [&response.body[..], b"\r\n\r\n"].concat()
+    };
 
-fn trim_ascii(s: &[u8]) -> &[u8] {
-    let begin = s.iter().take_while(|c| c.is_ascii_whitespace()).count();
-    let end = s.len() - s.iter().rev().take_while(|c| c.is_ascii_whitespace()).count();
-    &s[begin..end]
+    [header, body].concat()
 }

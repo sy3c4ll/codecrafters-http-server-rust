@@ -10,5 +10,6 @@ pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: PathBuf,
     pub version: HttpVersion,
-    pub headers: HashMap<Vec<u8>, Vec<u8>>,
+    pub headers: HashMap<String, String>,
+    pub body: Vec<u8>,
 }

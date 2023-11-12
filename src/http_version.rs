@@ -20,6 +20,9 @@ impl HttpVersion {
             _ => None,
         }
     }
+    pub const fn from_str(name: &str) -> Option<Self> {
+        Self::from_bytes(name.as_bytes())
+    }
     pub const fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()
     }
