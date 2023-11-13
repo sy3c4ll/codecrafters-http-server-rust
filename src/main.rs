@@ -6,7 +6,8 @@ use http_request::{HttpRequest, http_method::HttpMethod};
 use http_response::{HttpResponse, http_status::HttpStatus};
 use http_version::HttpVersion;
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, Read, Write, BufReader};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 
@@ -92,7 +93,34 @@ fn parse_request(buf: &[u8]) -> Option<HttpRequest> {
 }
 
 fn request_response(request: &HttpRequest) -> HttpResponse {
-    if request.path == Path::new("/user-agent") {
+    if let Ok(data)  = request.path.strip_prefix("/files") {
+        match (|| {
+            let envdir_idx = std::env::args().position(|s| s == "--directory")? + 1;
+            let envdir = std::env::args().nth(envdir_idx)?;
+            let path = Path::new(&envdir).join(data);
+            let file = File::open(path).ok()?;
+            let mut buf_reader = BufReader::new(file);
+            let mut buf = Vec::new();
+            buf_reader.read_to_end(&mut buf).ok()?;
+            Some(buf)
+        }) () {
+            Some(body) => HttpResponse {
+                version: request.version,
+                status: HttpStatus::OK,
+                headers: HashMap::from([
+                    ("Content-Type".to_string(), "application/octet-stream".to_string()),
+                    ("Content-Length".to_string(), body.len().to_string()),
+                ]),
+                body,
+            },
+            None => HttpResponse {
+                version: request.version,
+                status: HttpStatus::NOT_FOUND,
+                headers: HashMap::new(),
+                body: Vec::new(),
+            },
+        }
+    } else if request.path == Path::new("/user-agent") {
         match request.headers.get(&"User-Agent".to_lowercase()) {
             Some(data) => HttpResponse {
                 version: request.version,
