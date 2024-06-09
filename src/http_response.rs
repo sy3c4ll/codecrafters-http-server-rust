@@ -24,25 +24,37 @@ impl HttpResponse {
                 body: Vec::new(),
             }
         } else if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
-            Self {
-                version: request.version,
-                status: HttpStatus::OK,
-                headers: HashMap::from([
-                    ("Content-Type".to_string(), "text/plain".to_string()),
-                    ("Content-Length".to_string(), data.as_bytes().len().to_string()),
-                ]),
-                body: data.as_bytes().to_vec(),
+            match request.headers.get("accept-encoding").map(String::as_str) {
+                Some("gzip") => Self {
+                    version: request.version,
+                    status: HttpStatus::OK,
+                    headers: HashMap::from([
+                        ("Content-Encoding".to_owned(), "gzip".to_owned()),
+                        ("Content-Type".to_owned(), "text/plain".to_owned()),
+                        ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
+                    ]),
+                    body: data.as_bytes().to_owned(),
+                },
+                _ => Self {
+                    version: request.version,
+                    status: HttpStatus::OK,
+                    headers: HashMap::from([
+                        ("Content-Type".to_owned(), "text/plain".to_owned()),
+                        ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
+                    ]),
+                    body: data.as_bytes().to_owned(),
+                }
             }
         } else if request.path == Path::new("/user-agent") {
-            match request.headers.get(&"User-Agent".to_lowercase()) {
+            match request.headers.get("user-agent") {
                 Some(data) => Self {
                     version: request.version,
                     status: HttpStatus::OK,
                     headers: HashMap::from([
-                        ("Content-Type".to_string(), "text/plain".to_string()),
-                        ("Content-Length".to_string(), data.as_bytes().len().to_string()),
+                        ("Content-Type".to_owned(), "text/plain".to_owned()),
+                        ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
                     ]),
-                    body: data.as_bytes().to_vec(),
+                    body: data.as_bytes().to_owned(),
                 },
                 None => Self {
                     version: request.version,
@@ -53,16 +65,16 @@ impl HttpResponse {
             }
         } else if let (HttpMethod::Get, Ok(data)) = (request.method, request.path.strip_prefix("/files")) {
             let body = std::env::args().position(|s| s == "--directory")
-                .map_or(None, |i| std::env::args().nth(i + 1))
+                .and_then(|i| std::env::args().nth(i + 1))
                 .map(|s| Path::new(&s).join(data))
-                .map_or(None, |p| std::fs::read(p).ok());
+                .and_then(|p| std::fs::read(p).ok());
             match body {
                 Some(body) => Self {
                     version: request.version,
                     status: HttpStatus::OK,
                     headers: HashMap::from([
-                        ("Content-Type".to_string(), "application/octet-stream".to_string()),
-                        ("Content-Length".to_string(), body.len().to_string()),
+                        ("Content-Type".to_owned(), "application/octet-stream".to_owned()),
+                        ("Content-Length".to_owned(), body.len().to_string()),
                     ]),
                     body,
                 },
@@ -75,7 +87,7 @@ impl HttpResponse {
             }
         } else if let (HttpMethod::Post, Ok(data)) = (request.method, request.path.strip_prefix("/files")) {
             let path = std::env::args().position(|s| s == "--directory")
-                .map_or(None, |i| std::env::args().nth(i + 1))
+                .and_then(|i| std::env::args().nth(i + 1))
                 .map(|s| Path::new(&s).join(data));
             match path {
                 Some(path) => match std::fs::write(path, &request.body) {

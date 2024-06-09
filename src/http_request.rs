@@ -20,9 +20,8 @@ impl HttpRequest {
             .split(|c| *c == b'\n')
             .map(|s| s.strip_suffix(b"\r").unwrap_or(s))
             .skip_while(|s| s.is_empty());
-        let start = lines.next()?;
 
-        let start = std::str::from_utf8(start).ok()?;
+        let start = std::str::from_utf8(lines.next()?).ok()?;
         let mut start = start
             .split_whitespace()
             .filter(|s| !s.is_empty());
@@ -33,15 +32,13 @@ impl HttpRequest {
         let (method, path, version) =
             (str::parse(method).ok()?, PathBuf::from(path), str::parse(version).ok()?);
 
-        let pairs = lines
+        let headers = lines
             .by_ref()
             .take_while(|s| !s.is_empty())
-            .map(|line|
-                std::str::from_utf8(line)
-                    .map_or(None, |s| s.split_once(':') )
-                    .map(|(k, v)| (k.to_lowercase(), v.trim().to_owned()))
-            );
-        let headers = pairs.collect::<Option<HashMap<_, _>>>()?;
+            .map(|line| std::str::from_utf8(line)
+                .map_or(None, |s| s.split_once(':') )
+                .map(|(k, v)| (k.to_lowercase(), v.trim().to_owned())))
+            .collect::<Option<HashMap<_, _>>>()?;
 
         let body = lines
             .by_ref()
