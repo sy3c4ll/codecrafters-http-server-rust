@@ -1,7 +1,8 @@
 pub mod http_status;
 
-pub use super::http_request::{HttpRequest, http_method::HttpMethod};
-pub use super::http_version::HttpVersion;
+use super::encoding::Encoding;
+use super::http_request::{HttpRequest, http_method::HttpMethod};
+use super::http_version::HttpVersion;
 use http_status::HttpStatus;
 use std::collections::HashMap;
 use std::path::Path;
@@ -24,18 +25,21 @@ impl HttpResponse {
                 body: Vec::new(),
             }
         } else if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
-            match request.headers.get("accept-encoding").map(String::as_str) {
-                Some("gzip") => Self {
+            let encoding = request.headers.get("accept-encoding")
+                .map_or(vec![], Encoding::from_header)
+                .iter().find_map(Clone::clone);
+            match encoding {
+                Some(enc) => Self {
                     version: request.version,
                     status: HttpStatus::OK,
                     headers: HashMap::from([
-                        ("Content-Encoding".to_owned(), "gzip".to_owned()),
+                        ("Content-Encoding".to_owned(), enc.to_string()),
                         ("Content-Type".to_owned(), "text/plain".to_owned()),
                         ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
                     ]),
                     body: data.as_bytes().to_owned(),
                 },
-                _ => Self {
+                None => Self {
                     version: request.version,
                     status: HttpStatus::OK,
                     headers: HashMap::from([

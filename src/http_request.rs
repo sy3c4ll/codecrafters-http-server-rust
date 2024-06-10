@@ -1,6 +1,6 @@
 pub mod http_method;
 
-pub use super::http_version::HttpVersion;
+use super::http_version::HttpVersion;
 use http_method::HttpMethod;
 use std::collections::HashMap;
 use std::path::PathBuf;
