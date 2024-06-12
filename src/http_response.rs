@@ -25,29 +25,31 @@ impl HttpResponse {
                 body: Vec::new(),
             }
         } else if let Ok(Some(data)) = request.path.strip_prefix("/echo").map(|p| p.to_str()) {
-            let encoding = request.headers.get("accept-encoding")
-                .map_or(vec![], Encoding::from_header)
-                .iter().find_map(Clone::clone);
-            match encoding {
-                Some(enc) => Self {
-                    version: request.version,
-                    status: HttpStatus::OK,
-                    headers: HashMap::from([
-                        ("Content-Encoding".to_owned(), enc.to_string()),
+            let encoding = match request.headers.get("accept-encoding") {
+                Some(header) => header
+                    .split(',')
+                    .map(str::trim)
+                    .map(str::parse)
+                    .find_map(Result::ok)
+                    .unwrap_or(Encoding::Identity),
+                None => Encoding::Identity,
+            };
+            let data = encoding.encode(data.as_bytes());
+            Self {
+                version: request.version,
+                status: HttpStatus::OK,
+                headers: match encoding {
+                    Encoding::Identity => HashMap::from([
                         ("Content-Type".to_owned(), "text/plain".to_owned()),
-                        ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
+                        ("Content-Length".to_owned(), data.len().to_string()),
                     ]),
-                    body: data.as_bytes().to_owned(),
+                    _ => HashMap::from([
+                        ("Content-Encoding".to_owned(), encoding.to_string()),
+                        ("Content-Type".to_owned(), "text/plain".to_owned()),
+                        ("Content-Length".to_owned(), data.len().to_string()),
+                    ]),
                 },
-                None => Self {
-                    version: request.version,
-                    status: HttpStatus::OK,
-                    headers: HashMap::from([
-                        ("Content-Type".to_owned(), "text/plain".to_owned()),
-                        ("Content-Length".to_owned(), data.as_bytes().len().to_string()),
-                    ]),
-                    body: data.as_bytes().to_owned(),
-                }
+                body: data.to_owned(),
             }
         } else if request.path == Path::new("/user-agent") {
             match request.headers.get("user-agent") {
